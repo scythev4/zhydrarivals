@@ -66903,34 +66903,39 @@ for _, sub in ipairs({ "cosmetics/states", "crosshair_textures", "esp_images", "
     tbl17.w().ensureStorageDirectories("Zhydrarebuild/rivals/" .. sub)
 end
 
---  Lithium logo: your own PNG from the workspace, cached and converted to an
---  asset id for the menu rail, tab bar and watermark. No base64 needed.
+--  Lithium logo: embedded base64 -> written to disk once, turned into an asset
+--  id and applied to the menu rail, tab bar and watermark.
 do
-    local wrf = K.fn("writefile")
-    local rdf = K.fn("readfile")
-    local isf = K.fn("isfile")
-    local gca = K.fn("getcustomasset") or K.fn("getsynasset")
-
-    local SRC = "lithium.png"                      -- <- the PNG you drop in
-    local DST = "Zhydrarebuild/lithium_logo.png"   -- cached converted copy
-
-    -- 1. copy your PNG out of the workspace (only if you actually put one there)
-    if wrf and rdf and isf and isf(SRC) then
-        local ok, data = pcall(rdf, SRC)
-        if ok and type(data) == "string" and #data > 0 then
-            pcall(wrf, DST, data)
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local map = {}
+    for i = 1, 64 do map[alphabet:byte(i)] = i - 1 end
+    local function decode(s)
+        local out = buffer.create(#s * 3 // 4 + 3)
+        local n = 0
+        for i = 1, #s, 4 do
+            local a, b, c, d = s:byte(i, i + 3)
+            local vc, vd = map[c], map[d]
+            local v = map[a] * 262144 + map[b] * 4096 + (vc or 0) * 64 + (vd or 0)
+            buffer.writeu8(out, n, bit32.rshift(v, 16))
+            n += 1
+            if vc then buffer.writeu8(out, n, bit32.band(bit32.rshift(v, 8), 255)); n += 1 end
+            if vd then buffer.writeu8(out, n, bit32.band(v, 255)); n += 1 end
         end
+        return buffer.readstring(out, 0, n)
     end
 
-    -- 2. convert to an asset id and actually assign it this time
-    if gca and (not isf or isf(DST)) then
-        local ok, id = pcall(gca, DST)
-        if ok and type(id) == "string" then
-            K.LithiumLogo = id
+    local wrf = K.fn("writefile")
+    local gca = K.fn("getcustomasset") or K.fn("getsynasset")
+    if wrf and gca then
+        local path = "Zhydrarebuild/lithium_logo.png"
+        if pcall(wrf, path, decode(LITHIUM_LOGO_B64)) then
+            local ok, id = pcall(gca, path)
+            if ok and type(id) == "string" then
+                K.LithiumLogo = id
+            end
         end
     end
 end
-
 --  Zhydra's error reporter needs a sink; ours prints to the F9 console.
 tbl17.b().use({ Report = function(_, e)
     local detail = type(e) == "table" and (e.Detail or e.Operation) or e
